@@ -788,6 +788,17 @@ class ModelState {
   }
   bool IsGraphdef() const { return is_graphdef_; }
 
+  // Map from configuration name for an input to tensor name for
+  // that input in the model.
+  IONameMap input_name_map_;
+
+  // Map from configuration name for an output to tensor name for
+  // that output in the model.
+  IONameMap output_name_map_;
+
+  // TRTISTFModel for this context.
+  TRTISTFModelHandle trtistf_model_;
+
  private:
   ModelState(
       TRITONBACKEND_Model* triton_model, const std::string& name,
@@ -889,7 +900,8 @@ ModelState::ModelState(
     ni::TritonJson::Value&& model_config,
     std::unordered_map<std::string, std::string>&& model_paths,
     const bool is_graphdef)
-    : triton_model_(triton_model), name_(name),
+    : trtistf_model_(nullptr, TRTISTF_ModelDelete),
+      triton_model_(triton_model), name_(name),
       backend_config_(std::move(backend_config)),
       model_config_(std::move(model_config)),
       model_paths_(std::move(model_paths)), is_graphdef_(is_graphdef)
@@ -981,7 +993,7 @@ class ModelInstanceState : public nib::ModelInstance {
             enable_pinned_output),
         model_state_(model_state),
         triton_model_instance_(triton_model_instance),
-        trtistf_model_(nullptr, TRTISTF_ModelDelete),
+        trtistf_model_(nullptr),
         input_device_id_(MODEL_DEVICE)
   {
   }
@@ -998,7 +1010,7 @@ class ModelInstanceState : public nib::ModelInstance {
   IONameMap output_name_map_;
 
   // TRTISTFModel for this context.
-  TRTISTFModelHandle trtistf_model_;
+  TRTISTF_Model* trtistf_model_;
 
   // use for GPU allocator
   int input_device_id_;
@@ -1009,6 +1021,10 @@ ModelInstanceState::Create(
     ModelState* model_state, TRITONBACKEND_ModelInstance* triton_model_instance,
     ModelInstanceState** state)
 {
+  // TMP: ensure mutex which may not be needed actually
+  static std::mutex isc_mtx;
+  std::lock_guard<std::mutex> lk(isc_mtx);
+
   *state = nullptr;
 
   const char* instance_name;
@@ -1257,57 +1273,64 @@ ModelInstanceState::Create(
         "Auto mixed precision can not be set with TFTRT optimization");
   }
 
-  if (model_state->IsGraphdef()) {
-    // TODO better if passing instance name?
-    RETURN_IF_ERROR(GraphDef::CreateTRTISTFModel(
-        model_state->BackendConfig(), model_config, gpu_device, has_graph_level,
-        graph_level, model_state->Name(), gdp_itr->second,
-        &instance->trtistf_model_, &instance->input_name_map_,
-        &instance->output_name_map_, tftrt_config_ptr, auto_mixed_precision));
+  bool first_model_creation = (model_state->trtistf_model_ == nullptr);
+  if (first_model_creation) {
+    if (model_state->IsGraphdef()) {
+      // TODO better if passing instance name?
+      RETURN_IF_ERROR(GraphDef::CreateTRTISTFModel(
+          model_state->BackendConfig(), model_config, gpu_device, has_graph_level,
+          graph_level, model_state->Name(), gdp_itr->second,
+          &model_state->trtistf_model_, &model_state->input_name_map_,
+          &model_state->output_name_map_, tftrt_config_ptr, auto_mixed_precision));
+    } else {
+      RETURN_IF_ERROR(SavedModel::CreateTRTISTFModel(
+          model_state->BackendConfig(), model_config, gpu_device, has_graph_level,
+          graph_level, model_state->Name(), gdp_itr->second,
+          &model_state->trtistf_model_, &model_state->input_name_map_,
+          &model_state->output_name_map_, tftrt_config_ptr, auto_mixed_precision));
+    }
+
+    if (instance->input_device_id_ != ModelInstanceState::MODEL_DEVICE) {
+      std::vector<const char*> input_names, output_names;
+      std::vector<TRTISTF_DataType> input_types, output_types;
+      std::deque<std::string> io_names;
+
+      ni::TritonJson::Value config_inputs;
+      RETURN_IF_ERROR(model_config.MemberAsArray("input", &config_inputs));
+      for (size_t i = 0; i < config_inputs.ArraySize(); i++) {
+        ni::TritonJson::Value io;
+        RETURN_IF_ERROR(config_inputs.IndexAsObject(i, &io));
+        io_names.emplace_back();
+        RETURN_IF_ERROR(io.MemberAsString("name", &io_names.back()));
+        std::string io_data_type;
+        RETURN_IF_ERROR(io.MemberAsString("data_type", &io_data_type));
+
+        input_names.push_back(io_names.back().c_str());
+        input_types.push_back(nib::ConvertDataType(io_data_type));
+      }
+
+      ni::TritonJson::Value config_outputs;
+      RETURN_IF_ERROR(model_config.MemberAsArray("output", &config_outputs));
+      for (size_t i = 0; i < config_outputs.ArraySize(); i++) {
+        ni::TritonJson::Value io;
+        RETURN_IF_ERROR(config_outputs.IndexAsObject(i, &io));
+        io_names.emplace_back();
+        RETURN_IF_ERROR(io.MemberAsString("name", &io_names.back()));
+        std::string io_data_type;
+        RETURN_IF_ERROR(io.MemberAsString("data_type", &io_data_type));
+
+        output_names.push_back(io_names.back().c_str());
+        output_types.push_back(nib::ConvertDataType(io_data_type));
+      }
+      RETURN_IF_TRTISTF_ERROR(TRTISTF_ModelMakeCallable(
+          model_state->trtistf_model_.get(), input_names.data(), input_types.data(),
+          config_inputs.ArraySize(), output_names.data(), output_types.data(),
+          config_outputs.ArraySize()));
+    }
   } else {
-    RETURN_IF_ERROR(SavedModel::CreateTRTISTFModel(
-        model_state->BackendConfig(), model_config, gpu_device, has_graph_level,
-        graph_level, model_state->Name(), gdp_itr->second,
-        &instance->trtistf_model_, &instance->input_name_map_,
-        &instance->output_name_map_, tftrt_config_ptr, auto_mixed_precision));
-  }
-
-  if (instance->input_device_id_ != ModelInstanceState::MODEL_DEVICE) {
-    std::vector<const char*> input_names, output_names;
-    std::vector<TRTISTF_DataType> input_types, output_types;
-    std::deque<std::string> io_names;
-
-    ni::TritonJson::Value config_inputs;
-    RETURN_IF_ERROR(model_config.MemberAsArray("input", &config_inputs));
-    for (size_t i = 0; i < config_inputs.ArraySize(); i++) {
-      ni::TritonJson::Value io;
-      RETURN_IF_ERROR(config_inputs.IndexAsObject(i, &io));
-      io_names.emplace_back();
-      RETURN_IF_ERROR(io.MemberAsString("name", &io_names.back()));
-      std::string io_data_type;
-      RETURN_IF_ERROR(io.MemberAsString("data_type", &io_data_type));
-
-      input_names.push_back(io_names.back().c_str());
-      input_types.push_back(nib::ConvertDataType(io_data_type));
-    }
-
-    ni::TritonJson::Value config_outputs;
-    RETURN_IF_ERROR(model_config.MemberAsArray("output", &config_outputs));
-    for (size_t i = 0; i < config_outputs.ArraySize(); i++) {
-      ni::TritonJson::Value io;
-      RETURN_IF_ERROR(config_outputs.IndexAsObject(i, &io));
-      io_names.emplace_back();
-      RETURN_IF_ERROR(io.MemberAsString("name", &io_names.back()));
-      std::string io_data_type;
-      RETURN_IF_ERROR(io.MemberAsString("data_type", &io_data_type));
-
-      output_names.push_back(io_names.back().c_str());
-      output_types.push_back(nib::ConvertDataType(io_data_type));
-    }
-    RETURN_IF_TRTISTF_ERROR(TRTISTF_ModelMakeCallable(
-        instance->trtistf_model_.get(), input_names.data(), input_types.data(),
-        config_inputs.ArraySize(), output_names.data(), output_types.data(),
-        config_outputs.ArraySize()));
+    instance->trtistf_model_ = model_state->trtistf_model_.get();
+    instance->input_name_map_ = model_state->input_name_map_;
+    instance->output_name_map_ = model_state->output_name_map_;
   }
 
   *state = lstate.release();
@@ -1622,7 +1645,7 @@ ModelInstanceState::ProcessRequests(
     TRTISTF_TensorList* rtl = nullptr;
 
     TRTISTF_Error* tf_err = TRTISTF_ModelRun(
-        trtistf_model_.get(), *(input_tensors.release()),
+        trtistf_model_, *(input_tensors.release()),
         required_outputs.size(), output_names_cstr, &rtl);
     if (tf_err != nullptr) {
       auto err =
