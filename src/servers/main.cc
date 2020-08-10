@@ -811,6 +811,8 @@ Parse(TRITONSERVER_ServerOptions** server_options, int argc, char** argv)
   std::string backend_dir = "/opt/tritonserver/backends";
   std::vector<std::tuple<std::string, std::string, std::string>>
       backend_config_settings;
+  // Run server with TF 2 as default
+  backend_config_settings.push_back(ParseBackendConfigOption("tensorflow,version=2"));
 
 #ifdef TRITON_ENABLE_GPU
   double min_supported_compute_capability = TRITON_MIN_COMPUTE_CAPABILITY;
