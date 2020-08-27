@@ -41,7 +41,7 @@ enum class MemoryFormat {
   // Four wide channel vectorized row major format.
   CHW4,
   // Eight channel format where C is padded to a multiple of 8.
-  HCW8,
+  HWC8,
   // Sixteen wide channel vectorized row major format.
   CHW16,
   // Thirty-two wide channel vectorized row major format.
@@ -53,6 +53,7 @@ enum class MemoryFormat {
 MemoryFormat ConvertTrtFmtToFmt(nvinfer1::TensorFormat trt_fmt);
 
 const std::string MemoryFormat_Name(MemoryFormat fmt);
+int MemoryFormat_VectorSize(MemoryFormat fmt);
 
 inference::DataType ConvertTrtTypeToDataType(nvinfer1::DataType trt_type);
 
@@ -98,6 +99,8 @@ Status MaximumDims(
 void DimsToDimVec(const nvinfer1::Dims& model_dims, std::vector<int64_t>* dims);
 
 bool DimVecToDims(const std::vector<int64_t>& dim_vec, nvinfer1::Dims* dims);
+
+int64_t GetElementCount(const nvinfer1::Dims& dims);
 
 bool ContainsWildcard(const nvinfer1::Dims& dims);
 
