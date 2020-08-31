@@ -537,6 +537,8 @@ PlanBackend::CreateExecutionContext(
       std::vector<void*>(context->num_expected_bindings_, nullptr);
   context->buffer_is_ragged_ =
       std::vector<bool>(context->num_expected_bindings_, false);
+  context->is_linear_format_ =
+      std::vector<bool>(context->num_expected_bindings_, false);
   context->batch_inputs_ =
       std::vector<std::shared_ptr<Context::BatchInputData>>(
           context->num_expected_bindings_, nullptr);
@@ -915,14 +917,9 @@ PlanBackend::Context::InitializeExecuteInputBinding(
               inference::DataType_Name(input_datatype) + " for " + name_);
     }
 
-    MemoryFormat fmt =
-        ConvertTrtFmtToFmt(engine_->getBindingFormat(binding_index));
-    if (fmt == MemoryFormat::INVALID) {
-      return Status(
-          Status::Code::INVALID_ARG, "unexpected tensor format " +
-                                         MemoryFormat_Name(fmt) +
-                                         " for input '" + input_name + "'.");
-    }
+    is_linear_format_[io_index] =
+        (engine_->getBindingFormat(binding_index) ==
+         nvinfer1::TensorFormat::kLINEAR);
 
     nvinfer1::Dims engine_dims = engine_->getBindingDimensions(binding_index);
     // Detect whether dynamic or not
@@ -1014,6 +1011,13 @@ PlanBackend::Context::InitializeExecuteInputBinding(
                 DimsDebugString(context.max_dims_[io_index]) + " for input '" +
                 input_name + "' for " + name_);
       }
+    }
+
+    if (!is_linear_format_[io_index]) {
+      auto component_count =
+          GetElementCount(context.context_->getStrides(binding_index));
+      component_count *= engine_->getBindingComponentsPerElement(binding_index);
+      byte_size = component_count * engine_->getBindingBytesPerComponent(binding_index);
     }
 
     if (byte_size == -1) {
@@ -1316,14 +1320,9 @@ PlanBackend::Context::InitializeConfigExecuteOutputBindings(
                 inference::DataType_Name(io.data_type()) + " for " + name_);
       }
 
-      MemoryFormat fmt =
-          ConvertTrtFmtToFmt(engine_->getBindingFormat(binding_index));
-      if (fmt == MemoryFormat::INVALID) {
-        return Status(
-            Status::Code::INVALID_ARG, "unexpected tensor format " +
-                                           MemoryFormat_Name(fmt) +
-                                           " for output '" + io.name() + "'.");
-      }
+      is_linear_format_[io_index] =
+        (engine_->getBindingFormat(binding_index) ==
+         nvinfer1::TensorFormat::kLINEAR);
 
       const DimsList& model_config_dims =
           (io.has_reshape()) ? io.reshape().shape() : io.dims();
