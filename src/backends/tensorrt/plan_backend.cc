@@ -1713,7 +1713,7 @@ PlanBackend::Context::SetCudaGraphShape(
                 " for binding " + std::to_string(io_index) + " for " + name_);
       }
       std::vector<int64_t> dims;
-      DimsToDimVec(shape, &dims);
+      DimsToDimVec(shape, padding_info_[io_index], &dims);
       cuda_graph->input_dims_.emplace_back(dims);
       cuda_graph_key->insert(cuda_graph_key->end(), dims.begin(), dims.end());
     } else {
@@ -1731,7 +1731,7 @@ PlanBackend::Context::SetCudaGraphShape(
         auto& shape = cuda_graph->input_dims_.back();
         shape.insert(shape.end(), it->second.begin(), it->second.end());
         nvinfer1::Dims trt_shape;
-        DimVecToDims(shape, &trt_shape);
+        DimVecToDims(shape, padding_info_[io_index], &trt_shape);
         if (!trt_context->context_->setBindingDimensions(io_index, trt_shape)) {
           return Status(
               Status::Code::INTERNAL,
