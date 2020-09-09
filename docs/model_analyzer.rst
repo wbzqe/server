@@ -1,5 +1,5 @@
 ..
-  # Copyright (c) 2018-2020, NVIDIA CORPORATION. All rights reserved.
+  # Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved.
   #
   # Redistribution and use in source and binary forms, with or without
   # modification, are permitted provided that the following conditions
@@ -25,30 +25,23 @@
   # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
   # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-.. _section-installing-triton:
+.. _section-model-analyzer:
 
-Installing Triton
-=================
+Model Analyzer
+--------------
 
-The Triton Inference Server is available as a pre-built Docker
-container or you can :ref:`build it from source
-<section-building>`.
+The Triton Model Analyzer is a tool that uses :ref:`perf\_client
+<section-perf-client>` to apply load to your model while measure GPU
+memory and compute utilization. The Model Analyzer is specifically
+useful for characterizing the GPU memory requirements for your model
+under different batching and model instance configurations. Once you
+have this GPU memory usage information you can more intelligently
+decide on how to combine multiple models on the same GPU while
+remaining within the memory capacity of the GPU.
 
-The Triton Docker container is available on the `NVIDIA GPU Cloud
-(NGC) <https://ngc.nvidia.com>`_.
-
-Before you can pull a container from the NGC container registry, you
-must have Docker and nvidia-docker installed. For DGX users, this is
-explained in `Preparing to use NVIDIA Containers Getting Started Guide
-<http://docs.nvidia.com/deeplearning/dgx/preparing-containers/index.html>`_.
-For users other than DGX, follow the `nvidia-docker installation
-documentation <https://github.com/NVIDIA/nvidia-docker>`_ to install
-the most recent version of CUDA, Docker, and nvidia-docker.
-
-After performing the above setup, you can pull the Triton container
-using the following command::
-
-  docker pull nvcr.io/nvidia/tritonserver:20.08-py3
-
-Replace *20.08* with the version of inference server that you want to
-pull.
+The Model Analyzer repository is available at
+`github.com/triton-inference-server/model_analyzer
+<https://github.com/triton-inference-server/model_analyzer>`_ and a
+detailed explanation is provided in the blog `Maximizing Deep Learning
+Inference Performance with NVIDIA Model Analyzer
+<https://developer.nvidia.com/blog/maximizing-deep-learning-inference-performance-with-nvidia-model-analyzer/>`_.

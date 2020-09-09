@@ -29,6 +29,7 @@
 #include <string>
 #include <vector>
 #include "src/core/backend.h"
+#include "src/core/cuda_utils.h"
 #include "src/core/infer_parameter.h"
 #include "src/core/infer_request.h"
 #include "src/core/infer_response.h"
@@ -213,6 +214,15 @@ class TritonServerOptions {
   unsigned int ExitTimeout() const { return exit_timeout_; }
   void SetExitTimeout(unsigned int t) { exit_timeout_ = t; }
 
+  unsigned int BufferManagerThreadCount() const
+  {
+    return buffer_manager_thread_count_;
+  }
+  void SetBufferManagerThreadCount(unsigned int c)
+  {
+    buffer_manager_thread_count_ = c;
+  }
+
   bool Metrics() const { return metrics_; }
   void SetMetrics(bool b) { metrics_ = b; }
 
@@ -255,6 +265,7 @@ class TritonServerOptions {
   bool metrics_;
   bool gpu_metrics_;
   unsigned int exit_timeout_;
+  unsigned int buffer_manager_thread_count_;
   uint64_t pinned_memory_pool_size_;
   std::map<int, uint64_t> cuda_memory_pool_size_;
   double min_compute_capability_;
@@ -965,6 +976,16 @@ TRITONSERVER_ServerOptionsSetExitTimeout(
 }
 
 TRITONSERVER_Error*
+TRITONSERVER_ServerOptionsSetBufferManagerThreadCount(
+    TRITONSERVER_ServerOptions* options, unsigned int thread_count)
+{
+  TritonServerOptions* loptions =
+      reinterpret_cast<TritonServerOptions*>(options);
+  loptions->SetBufferManagerThreadCount(thread_count);
+  return nullptr;  // Success
+}
+
+TRITONSERVER_Error*
 TRITONSERVER_ServerOptionsSetLogInfo(
     TRITONSERVER_ServerOptions* options, bool log)
 {
@@ -1523,6 +1544,7 @@ TRITONSERVER_ServerNew(
   lserver->SetStrictReadinessEnabled(loptions->StrictReadiness());
   lserver->SetExitTimeoutSeconds(loptions->ExitTimeout());
   lserver->SetBackendCmdlineConfig(loptions->BackendCmdlineConfigMap());
+  lserver->SetBufferManagerThreadCount(loptions->BufferManagerThreadCount());
 
   // FIXME these should be removed once all backends use
   // BackendConfig.
